@@ -1,0 +1,231 @@
+<?xml version="1.0"?>
+<!--
+  Converted from pelican.xacro to URDF
+  Pelican quadrotor drone description
+-->
+
+<robot name="pelican">
+  
+  <!-- Base link (main body) -->
+  <link name="base_link">
+    <inertial>
+      <mass value="1.0"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <inertia ixx="0.01" ixy="0.0" ixz="0.0" iyy="0.01" iyz="0.0" izz="0.02"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <!-- Main body as a box representing the drone frame -->
+        <box size="0.1 0.1 0.2"/>
+      </geometry>
+      <material name="black">
+        <color rgba="0.2 0.2 0.2 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.1 0.1 0.2"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <!-- Front rotor -->
+  <link name="front_rotor">
+    <inertial>
+      <mass value="0.1"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <inertia ixx="0.000163733" ixy="0.0" ixz="0.0" iyy="0.000163733" iyz="0.0" izz="0.0001632"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.128" length="0.003"/>
+      </geometry>
+      <material name="red">
+        <color rgba="1.0 0.0 0.0 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.128" length="0.003"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="front_rotor_joint" type="continuous">
+    <parent link="base_link"/>
+    <child link="front_rotor"/>
+    <origin xyz="0.21 0 0.05" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+  </joint>
+
+  <!-- Left rotor -->
+  <link name="left_rotor">
+    <inertial>
+      <mass value="0.1"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <inertia ixx="0.000163733" ixy="0.0" ixz="0.0" iyy="0.000163733" iyz="0.0" izz="0.0001632"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.128" length="0.003"/>
+      </geometry>
+      <material name="blue">
+        <color rgba="0.0 0.0 1.0 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.128" length="0.003"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="left_rotor_joint" type="continuous">
+    <parent link="base_link"/>
+    <child link="left_rotor"/>
+    <origin xyz="0 0.21 0.05" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+  </joint>
+
+  <!-- Back rotor -->
+  <link name="back_rotor">
+    <inertial>
+      <mass value="0.1"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <inertia ixx="0.000163733" ixy="0.0" ixz="0.0" iyy="0.000163733" iyz="0.0" izz="0.0001632"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.128" length="0.003"/>
+      </geometry>
+      <material name="blue">
+        <color rgba="0.0 0.0 1.0 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.128" length="0.003"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="back_rotor_joint" type="continuous">
+    <parent link="base_link"/>
+    <child link="back_rotor"/>
+    <origin xyz="-0.21 0 0.05" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+  </joint>
+
+  <!-- Right rotor -->
+  <link name="right_rotor">
+    <inertial>
+      <mass value="0.1"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <inertia ixx="0.000163733" ixy="0.0" ixz="0.0" iyy="0.000163733" iyz="0.0" izz="0.0001632"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.128" length="0.003"/>
+      </geometry>
+      <material name="blue">
+        <color rgba="0.0 0.0 1.0 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.128" length="0.003"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="right_rotor_joint" type="continuous">
+    <parent link="base_link"/>
+    <child link="right_rotor"/>
+    <origin xyz="0 -0.21 0.05" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+  </joint>
+
+  <!-- Arms connecting body to rotors (visual only) -->
+  <link name="front_arm">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <geometry>
+        <cylinder radius="0.01" length="0.21"/>
+      </geometry>
+      <material name="black">
+        <color rgba="0.2 0.2 0.2 1.0"/>
+      </material>
+    </visual>
+  </link>
+
+  <joint name="front_arm_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="front_arm"/>
+    <origin xyz="0.105 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <link name="left_arm">
+    <visual>
+      <origin xyz="0 0 0" rpy="1.5708 0 0"/>
+      <geometry>
+        <cylinder radius="0.01" length="0.21"/>
+      </geometry>
+      <material name="black">
+        <color rgba="0.2 0.2 0.2 1.0"/>
+      </material>
+    </visual>
+  </link>
+
+  <joint name="left_arm_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="left_arm"/>
+    <origin xyz="0 0.105 0" rpy="0 0 0"/>
+  </joint>
+
+  <link name="back_arm">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <geometry>
+        <cylinder radius="0.01" length="0.21"/>
+      </geometry>
+      <material name="black">
+        <color rgba="0.2 0.2 0.2 1.0"/>
+      </material>
+    </visual>
+  </link>
+
+  <joint name="back_arm_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="back_arm"/>
+    <origin xyz="-0.105 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <link name="right_arm">
+    <visual>
+      <origin xyz="0 0 0" rpy="1.5708 0 0"/>
+      <geometry>
+        <cylinder radius="0.01" length="0.21"/>
+      </geometry>
+      <material name="black">
+        <color rgba="0.2 0.2 0.2 1.0"/>
+      </material>
+    </visual>
+  </link>
+
+  <joint name="right_arm_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="right_arm"/>
+    <origin xyz="0 -0.105 0" rpy="0 0 0"/>
+  </joint>
+
+</robot>
