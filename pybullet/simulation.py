@@ -5,7 +5,16 @@ import pybullet_data
 
 def main():
     # 1. Connect to PyBullet physics server (GUI)
-    p.connect(p.GUI)
+    physicsClient = p.connect(p.GUI_SERVER)  # Use GUI_SERVER for better mouse control
+    
+    
+    # Set camera position and parameters
+    p.resetDebugVisualizerCamera(
+        cameraDistance=3.0,  # Distance from camera to target
+        cameraYaw=45.0,     # Rotation around the vertical axis in degrees
+        cameraPitch=-30.0,  # Rotation around the horizontal axis in degrees
+        cameraTargetPosition=[0, 0, 0]  # Point the camera is looking at
+    )
 
     # 2. Add search paths for URDF and meshes
     #    plane.urdf comes from pybullet_data; meshes are in 'meshes/'
@@ -64,6 +73,26 @@ def main():
                 if not p.isConnected():
                     print("GUI window closed - thread terminated")
                     break
+                
+                # Handle keyboard events for camera control
+                keys = p.getKeyboardEvents()
+                
+                # Get current camera info
+                cam_data = p.getDebugVisualizerCamera()
+                dist = cam_data[10]
+                yaw = cam_data[8]
+                pitch = cam_data[9]
+                target = list(cam_data[11])
+                
+                # Camera controls
+                if ord('r') in keys and keys[ord('r')] & p.KEY_WAS_TRIGGERED:  # Reset camera
+                    p.resetDebugVisualizerCamera(
+                        cameraDistance=3.0,
+                        cameraYaw=45.0,
+                        cameraPitch=-30.0,
+                        cameraTargetPosition=[0, 0, 0]
+                    )
+                    print("Camera reset to default position")
                 
                 time.sleep(1.0/240.0)
                 
