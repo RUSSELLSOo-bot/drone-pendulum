@@ -5,7 +5,7 @@ import pybullet_data
 import numpy as np
 
 # --- TUNE THIS FOR HOVER ---
-HOVER_SPEED = 400.0   # target angular velocity (rad/s) per rotor, calculated from physics
+HOVER_SPEED = 399.3   # target angular velocity (rad/s) per rotor, calculated from physics
 MAX_FORCE   = 1000.0   # max torque each motor can apply (increased to allow motors to reach target speed)
 
 # Rotor indices and their initial orientations
@@ -25,6 +25,9 @@ ROTOR_ORIENTATIONS = {
 }
 motor_constant = 9.9865e-06
 rotor_drag_coefficient = 8.06428e-05
+
+A_face = np.pi * 0.128 **2 # (m)
+A_side = 2 * 0.128 * 0.01  # projected area of the rotor in side view
 
 def set_rotor_speeds(drone_id, speeds):
     """Apply a list of target velocities to each rotor joint."""
@@ -51,7 +54,7 @@ def apply_prop_force(drone_id):
         thrust = motor_constant * omega**2  # Calculate thrust force
        
 
-        arm_state = p.getLinkState(drone_id, joint_idx, computeForwardKinematics=True)
+        arm_state = p.getLinkState(drone_id, joint_idx, computeForwardKinematics=True, computeLinkVelocity=True)
         pos_world = arm_state[0]  # position within the link frame (x,y,z)
         orientation_world = p.getMatrixFromQuaternion(arm_state[1])  # orientation in world frame (3x3)
         
@@ -59,14 +62,33 @@ def apply_prop_force(drone_id):
         
         
         # Calculate force vector by multiplying thrust magnitude with direction
-        force = thrust * thrust_dir  # force vector in world frame
+        force_thrust = thrust * thrust_dir  # force vector in world frame
         
-        
+        lin_vel = arm_state[6]  # linear velocity of the link in world frame
+
+        speed = np.linalg.norm(lin_vel)
+        if speed > 1e-3:
+            v_dir = lin_vel / speed
+
+            # projected area: face + side components
+            cos_theta = np.dot(v_dir, thrust_dir)
+            
+            A_proj = abs(cos_theta)*A_face + np.sqrt(max(0,1 - cos_theta**2))*A_side
+
+            # drag magnitude (Cd already includes ½ρ)
+            drag_mag = rotor_drag_coefficient * A_proj * speed**2
+            force_drag = -drag_mag * v_dir
+        else:
+            force_drag = np.zeros(3)
+
+        force_total = force_thrust + force_drag  # Total force vector
+        print(force_drag)
+
         # Apply the force at the rotor position in world frame
         p.applyExternalForce(
             objectUniqueId=drone_id,
             linkIndex=joint_idx,
-            forceObj=force.tolist(),  # Convert numpy array to list
+            forceObj=force_total.tolist(),  # Convert numpy array to list
             posObj=pos_world,
             flags=p.WORLD_FRAME)
 
@@ -151,7 +173,7 @@ def main():
             apply_prop_force(drone_id)
 
             p.stepSimulation()  
-            time.sleep(1/240.0)
+            time.sleep(1/300.0)
             
             try:
                 # Check connection status
