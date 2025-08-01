@@ -2,37 +2,83 @@ import os
 import time
 import pybullet as p
 import pybullet_data
+import numpy as np
 
 # --- TUNE THIS FOR HOVER ---
-HOVER_SPEED = 4000.0   # target angular velocity (rad/s) per rotor
-MAX_FORCE   = 10.0     # max torque each motor can apply
+HOVER_SPEED = 400.0   # target angular velocity (rad/s) per rotor, calculated from physics
+MAX_FORCE   = 1000.0   # max torque each motor can apply (increased to allow motors to reach target speed)
 
+# Rotor indices and their initial orientations
+FRONT_ROTOR = 1  
+LEFT_ROTOR = 3  
+BACK_ROTOR = 5   
+RIGHT_ROTOR = 7 
 
+ROTOR_JOINTS = [FRONT_ROTOR, LEFT_ROTOR, BACK_ROTOR, RIGHT_ROTOR]
 
-ROTOR_JOINTS = [1, 3, 5, 7]
+# Initial orientations in Euler angles (roll, pitch, yaw)
+ROTOR_ORIENTATIONS = {
+    FRONT_ROTOR: [0, 1.5708, 0],    # 90° around Y
+    LEFT_ROTOR: [1.5708, 0, 0],     # 90° around X
+    BACK_ROTOR: [0, 1.5708, 0],     # 90° around Y
+    RIGHT_ROTOR: [1.5708, 0, 0]     # 90° around X
+}
 motor_constant = 9.9865e-06
 rotor_drag_coefficient = 8.06428e-05
 
 def set_rotor_speeds(drone_id, speeds):
     """Apply a list of target velocities to each rotor joint."""
     for joint_idx, speed in zip(ROTOR_JOINTS, speeds):
+        # First disable the motor to remove any velocity constraint
+        p.changeDynamics(drone_id, joint_idx, maxJointVelocity=2000)  
+
+        # Then set the new target velocity with maximum force
         p.setJointMotorControl2(
             bodyIndex=drone_id,
             jointIndex=joint_idx,
             controlMode=p.VELOCITY_CONTROL,
             targetVelocity=speed,
-            force=MAX_FORCE
+            force=MAX_FORCE,
         )
 
 
 def apply_prop_force(drone_id):
     for joint_idx in ROTOR_JOINTS:
-        omega = p.getJointState(drone_id, joint_idx) # Get current angular velocity
+        joint_state = p.getJointState(drone_id, joint_idx) # Get current joint state
+        omega = joint_state[1]  # Get angular velocity from joint state
+        
+   
+        thrust = motor_constant * omega**2  # Calculate thrust force
+       
+
+        arm_state = p.getLinkState(drone_id, joint_idx, computeForwardKinematics=True)
+        pos_world = arm_state[0]  # position within the link frame (x,y,z)
+        orientation_world = p.getMatrixFromQuaternion(arm_state[1])  # orientation in world frame (3x3)
+        
+        thrust_dir = np.array([orientation_world[2], orientation_world[5], orientation_world[8]])  # z direction of the link local frame
+        
+        
+        # Calculate force vector by multiplying thrust magnitude with direction
+        force = thrust * thrust_dir  # force vector in world frame
+        
+        
+        # Apply the force at the rotor position in world frame
+        p.applyExternalForce(
+            objectUniqueId=drone_id,
+            linkIndex=joint_idx,
+            forceObj=force.tolist(),  # Convert numpy array to list
+            posObj=pos_world,
+            flags=p.WORLD_FRAME)
 
 
 def main():
     # 1. Connect to PyBullet physics server (GUI)
     physicsClient = p.connect(p.GUI_SERVER)  # Use GUI_SERVER for better mouse control
+    
+    # Configure physics simulation
+    p.setPhysicsEngineParameter(fixedTimeStep=1.0/240.0)  # Higher frequency updates
+    p.setPhysicsEngineParameter(numSolverIterations=50)   # More accurate physics
+    p.setPhysicsEngineParameter(numSubSteps=4)            # More substeps for stability
     
 
     # Set camera position and parameters
@@ -85,22 +131,28 @@ def main():
 
     # 6. Configure gravity and real-time simulation
     p.setGravity(0, 0, -9.81)
-    p.setRealTimeSimulation(1)
+    p.setRealTimeSimulation(0)  # Disable real-time simulation for more control
+     
+ 
+
 
     # 7. Main simulation loop
     try:
         print("Starting simulation loop...")
         while True:
-            # Front (0) and Back (2) rotors spin clockwise
-            # Left (1) and Right (3) rotors spin counter-clockwise
+            # Set rotor speeds and apply forces
             rotor_speeds = [
                 -HOVER_SPEED,    # Front rotor (clockwise)
-                HOVER_SPEED,   # Left rotor (counter-clockwise)
+                HOVER_SPEED,     # Left rotor (counter-clockwise)
                 -HOVER_SPEED,    # Back rotor (clockwise)
-                HOVER_SPEED,   # Right rotor (counter-clockwise)
+                HOVER_SPEED,     # Right rotor (counter-clockwise)
             ]
             set_rotor_speeds(drone_id, rotor_speeds)
+            apply_prop_force(drone_id)
 
+            p.stepSimulation()  
+            time.sleep(1/240.0)
+            
             try:
                 # Check connection status
                 connection_info = p.getConnectionInfo()
