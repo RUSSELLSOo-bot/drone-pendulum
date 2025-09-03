@@ -146,7 +146,7 @@ class DroneController:
         yaw_correction = pid_output[2]
         base_speed = HOVER_SPEED
 
-        ]
+    
         # Correction: For pitch, front and back should be opposite
         # So, front: base - pitch_correction, back: base + pitch_correction
         # For roll, left: base - roll_correction, right: base + roll_correction
