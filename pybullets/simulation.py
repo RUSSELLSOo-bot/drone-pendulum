@@ -4,14 +4,16 @@ import pybullet as p
 import pybullet_data
 import numpy as np
 from scipy.spatial.transform import Rotation as R
+import threading
 import gymnasium as gym
 from gymnasium import spaces
+from stable_baselines3 import PPO
+from stable_baselines3.common.callbacks import EvalCallback
 
 # --- TUNE THIS FOR HOVER ---
 HOVER_SPEED = 399.3   # target angular velocity (rad/s) per rotor, calculated from physics
 MAX_FORCE   = 1000.0   # max torque each motor can apply (increased to allow motors to reach target speed)
 
-# Rotor indices and their initial orientations
 FRONT_ROTOR = 1  
 LEFT_ROTOR = 3  
 BACK_ROTOR = 5   
@@ -19,59 +21,40 @@ RIGHT_ROTOR = 7
 
 ROTOR_JOINTS = [FRONT_ROTOR, LEFT_ROTOR, BACK_ROTOR, RIGHT_ROTOR]
 
-# Initial orientations in Euler angles (roll, pitch, yaw)
 ROTOR_ORIENTATIONS = {
-    FRONT_ROTOR: [0, 1.5708, 0],    # 90° around Y
-    LEFT_ROTOR: [1.5708, 0, 0],     # 90° around X
-    BACK_ROTOR: [0, 1.5708, 0],     # 90° around Y
-    RIGHT_ROTOR: [1.5708, 0, 0]     # 
+    FRONT_ROTOR: [0, 1.5708, 0],
+    LEFT_ROTOR: [1.5708, 0, 0],
+    BACK_ROTOR: [0, 1.5708, 0],
+    RIGHT_ROTOR: [1.5708, 0, 0]
 }
 motor_constant = 9.9865e-06
 rotor_drag_coefficient = 8.06428e-05
-
-A_face = np.pi * 0.128 **2 # (m)
-A_side = 2 * 0.128 * 0.01  # projected area of the rotor in side view
-
-try:
-    from stable_baselines3 import PPO
-    from stable_baselines3.common.callbacks import EvalCallback
-    RL_AVAILABLE = True
-except ImportError:
-    RL_AVAILABLE = False
+A_face = np.pi * 0.128 **2
+A_side = 2 * 0.128 * 0.01
 
 class DroneController:
     def __init__(self, drone_id):
         self.drone_id = drone_id
-        self.Kp_orientation = np.array([0.1, 0.1, 0.1])  # Much smaller from 2.0
-        self.Ki_orientation = np.array([0.0, 0.0, 0.0])  # Keep at 0 initially
-        self.Kd_orientation = np.array([0.05, 0.05, 0.05])  # Much smaller from 0.5
-
-        # Error tracking
+        self.initial_pos = [0, 0, 1]
+        self.initial_ori = p.getQuaternionFromEuler([0, 0, 0])
+        self.Kp_orientation = np.array([0.1, 0.1, 0.1])
+        self.Ki_orientation = np.array([0.0, 0.0, 0.0])
+        self.Kd_orientation = np.array([0.05, 0.05, 0.05])
         self.orientation_integral = np.zeros(3)
         self.last_orientation_error = np.zeros(3)
         self.last_time = time.time()
-
-        self.initial_pos = [0, 0, 1]  # Store initial position
-        self.initial_ori = p.getQuaternionFromEuler([0, 0, 0])  # Store initial orientation
-
-        # Add debug sliders for PID tuning
         self.Kp_slider = p.addUserDebugParameter("Kp", 0, 5.0, 1.0)
         self.Ki_slider = p.addUserDebugParameter("Ki", 0, 1.0, 0.01)
         self.Kd_slider = p.addUserDebugParameter("Kd", 0, 2.0, 0.5)
-
-        # Wind simulation parameters
-        self.wind_enabled = False
-        self.wind_strength = 1.0
-        self.wind_frequency = 0.5  # How often wind changes (seconds)
-        self.last_wind_update = time.time()
-        self.current_wind = np.zeros(3)
-        
-        # Add wind control sliders
         self.wind_toggle = p.addUserDebugParameter("Wind On/Off", 0, 1, 0)
         self.wind_strength_slider = p.addUserDebugParameter("Wind Strength", 0, 5.0, 1.0)
+        self.wind_enabled = False
+        self.wind_strength = 1.0
+        self.wind_frequency = 0.5
+        self.last_wind_update = time.time()
+        self.current_wind = np.zeros(3)
 
     def set_rotor_speeds(self, speeds):
-        """Apply a list of target velocities to each rotor joint."""
         for joint_idx, speed in zip(ROTOR_JOINTS, speeds):
             p.changeDynamics(self.drone_id, joint_idx, maxJointVelocity=2000)
             p.setJointMotorControl2(
@@ -87,13 +70,11 @@ class DroneController:
             joint_state = p.getJointState(self.drone_id, joint_idx)
             omega = joint_state[1]
             thrust = motor_constant * omega**2
-
             arm_state = p.getLinkState(self.drone_id, joint_idx, computeForwardKinematics=True, computeLinkVelocity=True)
             pos_world = arm_state[0]
             orientation_world = p.getMatrixFromQuaternion(arm_state[1])
             thrust_dir = np.array([orientation_world[2], orientation_world[5], orientation_world[8]])
             force_thrust = thrust * thrust_dir
-
             lin_vel = arm_state[6]
             speed = np.linalg.norm(lin_vel)
             if speed > 1e-3:
@@ -104,7 +85,6 @@ class DroneController:
                 force_drag = -drag_mag * v_dir
             else:
                 force_drag = np.zeros(3)
-
             force_total = force_thrust + force_drag
             p.applyExternalForce(
                 objectUniqueId=self.drone_id,
@@ -115,121 +95,87 @@ class DroneController:
             )
 
     def apply_wind_forces(self):
-        """Apply random wind forces to simulate atmospheric disturbances"""
         current_time = time.time()
-        
-        # Read wind settings from sliders
         wind_enabled = p.readUserDebugParameter(self.wind_toggle) > 0.5
         wind_strength = p.readUserDebugParameter(self.wind_strength_slider)
-        
         if not wind_enabled:
             return
-        
-        # Update wind direction periodically
         if current_time - self.last_wind_update > self.wind_frequency:
-            # Generate new wind vector (more horizontal than vertical)
             self.current_wind = np.array([
-                np.random.normal(0, wind_strength * 0.5),  # X component
-                np.random.normal(0, wind_strength * 0.5),  # Y component  
-                np.random.normal(0, wind_strength * 0.1)   # Z component (less vertical)
+                np.random.normal(0, wind_strength * 0.5),
+                np.random.normal(0, wind_strength * 0.5),
+                np.random.normal(0, wind_strength * 0.1)
             ])
             self.last_wind_update = current_time
-        
-        # Add small continuous turbulence
         turbulence = np.random.normal(0, wind_strength * 0.1, 3)
         total_wind = self.current_wind + turbulence
-        
-        # Apply wind force to drone body
         p.applyExternalForce(
             objectUniqueId=self.drone_id,
-            linkIndex=-1,  # Apply to main body
+            linkIndex=-1,
             forceObj=total_wind.tolist(),
-            posObj=[0, 0, 0],  # Apply at center of mass
+            posObj=[0, 0, 0],
             flags=p.LINK_FRAME
         )
 
     def stabilize_orientation(self, target_yaw = 0.0, target_roll = 0.0, target_pitch = 0.0):
         current_time = time.time()
         dt = current_time - self.last_time
-
         _, orientation = p.getBasePositionAndOrientation(self.drone_id)
-        curr_rotation = R.from_quat(orientation) #creates rotation obj form quat
-
-        roll, pitch, yaw = curr_rotation.as_euler('xyz', degrees = False) #radians
-
-        desired_rotation = R.from_euler('xyz', [target_roll, target_pitch, target_yaw]) #creates rot obj from euler
-
-        #Control Loops
+        curr_rotation = R.from_quat(orientation)
+        roll, pitch, yaw = curr_rotation.as_euler('xyz', degrees = False)
         orientation_error = np.array([
             target_roll - roll,
             target_pitch - pitch,
             target_yaw - yaw
         ])
-        
-        # Calculate integral of error (sum of error * dt)
         self.orientation_integral += orientation_error * dt
-
-        # Add anti-windup - limit the integral term
-        MAX_INTEGRAL = 2.0  # Adjust this value based on your needs
+        MAX_INTEGRAL = 2.0
         self.orientation_integral = np.clip(self.orientation_integral, -MAX_INTEGRAL, MAX_INTEGRAL)
-
-        # Read current values from sliders
         kp = p.readUserDebugParameter(self.Kp_slider)
         ki = p.readUserDebugParameter(self.Ki_slider)
         kd = p.readUserDebugParameter(self.Kd_slider)
-        
         self.Kp_orientation = np.array([kp, kp, kp])
         self.Ki_orientation = np.array([ki, ki, ki])
         self.Kd_orientation = np.array([kd, kd, kd])
-
-        # Calculate proper derivative of error
-        deriv_error = -(np.array(p.getBaseVelocity(self.drone_id)[1]))  # Negative because we want to oppose motion
-
+        deriv_error = -(np.array(p.getBaseVelocity(self.drone_id)[1]))
         pid_output = (self.Kp_orientation * orientation_error +
                      self.Ki_orientation * self.orientation_integral +
                      self.Kd_orientation * deriv_error)
-
-        roll_correction = pid_output[0]   # Positive roll needs right rotor faster than left
-        pitch_correction = pid_output[1]  # Positive pitch needs back rotor faster than front
-        yaw_correction = pid_output[2]    # For yaw, adjust CCW vs CW rotor speeds
-
-        # Replace the two print statements with a single updating line
-        print(f"\rRoll: {roll:5.2f}, Pitch: {pitch:5.2f}, Yaw: {yaw:5.2f} | Corrections - Roll: {roll_correction:5.2f}, Pitch: {pitch_correction:5.2f}, Yaw: {yaw_correction:5.2f}", end="", flush=True)
-
+        roll_correction = pid_output[0]
+        pitch_correction = pid_output[1]
+        yaw_correction = pid_output[2]
         base_speed = HOVER_SPEED
-        # Modified rotor speed calculations
+
+        ]
+        # Correction: For pitch, front and back should be opposite
+        # So, front: base - pitch_correction, back: base + pitch_correction
+        # For roll, left: base - roll_correction, right: base + roll_correction
         rotor_speeds = [
-            -(base_speed + pitch_correction - roll_correction + yaw_correction),  # Front (CW)
-            (base_speed - pitch_correction + roll_correction + yaw_correction),   # Left (CCW)
-            -(base_speed - pitch_correction - roll_correction + yaw_correction),  # Back (CW)
-            (base_speed + pitch_correction + roll_correction + yaw_correction)    # Right (CCW)
+            -(base_speed - pitch_correction + roll_correction + yaw_correction),  # Front
+            base_speed + pitch_correction - roll_correction + yaw_correction,  # Left
+            -(base_speed + pitch_correction + roll_correction + yaw_correction),  # Back
+            base_speed - pitch_correction - roll_correction + yaw_correction   # Right
         ]
 
-        # Add speed limits
         rotor_speeds = np.clip(rotor_speeds, -2000, 2000)
-
-        # Apply the corrected speeds
         self.set_rotor_speeds(rotor_speeds)
-        
         self.last_orientation_error = orientation_error
+
+        # Print one updating line (no new lines)
+        print(
+            f"\rRoll: {roll:5.2f}, Pitch: {pitch:5.2f}, Yaw: {yaw:5.2f} | "
+            f"Rotor Speeds: [{rotor_speeds[0]:6.1f}, {rotor_speeds[1]:6.1f}, {rotor_speeds[2]:6.1f}, {rotor_speeds[3]:6.1f}]",
+            end="", flush=True
+        )
 
         self.last_time = current_time
 
     def reset_drone(self):
-        """Unload and reload the drone"""
-        
-        # Remove existing drone
         p.removeBody(self.drone_id)
-        
-        # Reload drone from URDF
         script_dir = os.path.dirname(os.path.realpath(__file__))
         urdf_dir = os.path.join(script_dir, "urdf")
         pelican_urdf = os.path.join(urdf_dir, "pelican.urdf")
-        
-        # Create new drone instance
         self.drone_id = p.loadURDF(pelican_urdf, self.initial_pos, self.initial_ori, useFixedBase=False)
-        
-        # Reset controller states
         self.orientation_integral = np.zeros(3)
         self.last_orientation_error = np.zeros(3)
         self.last_time = time.time()
@@ -308,6 +254,19 @@ class DroneController:
         print(f"Episode reward: {episode_reward:.2f}")
         print(f"Steps survived: {step_count}")
         print(f"Final PID gains: Kp={final_pid[0]:.3f}, Ki={final_pid[1]:.3f}, Kd={final_pid[2]:.3f}")
+
+    def constrain_to_pitch_rotation_only(self):
+        """
+        Constrain the drone to only rotate around the Y axis (pitch) and prevent translation.
+        This function fixes the drone at [0, 0, 1] and zeroes roll/yaw, but does NOT perform stabilization.
+        Call this in the main simulation loop before or after stabilize_orientation().
+        """
+        _, orientation = p.getBasePositionAndOrientation(self.drone_id)
+        curr_rotation = R.from_quat(orientation)
+        _, pitch, _ = curr_rotation.as_euler('xyz', degrees=False)
+        # Set orientation to only pitch, fix position
+        new_orientation = p.getQuaternionFromEuler([0, pitch, 0])
+        p.resetBasePositionAndOrientation(self.drone_id, [0, 0, 1], new_orientation)
 
 class DroneStabilizationEnv(gym.Env):
     def __init__(self, controller):
@@ -565,38 +524,30 @@ def main():
     p.setPhysicsEngineParameter(fixedTimeStep=1.0/240.0)
     p.setPhysicsEngineParameter(numSolverIterations=50)
     p.setPhysicsEngineParameter(numSubSteps=4)
-
     p.resetDebugVisualizerCamera(
         cameraDistance=3.0,
         cameraYaw=45.0,
         cameraPitch=-30.0,
         cameraTargetPosition=[0, 0, 0]
     )
-
     p.setAdditionalSearchPath(pybullet_data.getDataPath())
     script_dir = os.path.dirname(os.path.realpath(__file__))
     urdf_dir = os.path.join(script_dir, "urdf")
     mesh_dir = os.path.join(script_dir, "meshes")
     p.setAdditionalSearchPath(mesh_dir)
-
     plane_urdf = os.path.join(pybullet_data.getDataPath(), "plane.urdf")
     plane_id = p.loadURDF(plane_urdf)
-
     pelican_urdf = os.path.join(urdf_dir, "pelican.urdf")
     start_pos = [0, 0, 1]
     start_ori = p.getQuaternionFromEuler([0, 0, 0])
-
     try:
         drone_id = p.loadURDF(pelican_urdf, start_pos, start_ori, useFixedBase=False)
     except p.error as e:
         print(f"PyBullet error loading URDF: {e}")
         return
-
     p.setGravity(0, 0, -9.81)
     p.setRealTimeSimulation(0)
-
     controller = DroneController(drone_id)
-
     try:
         print("Starting simulation loop...")
         rotor_speeds = [
@@ -606,35 +557,30 @@ def main():
                 HOVER_SPEED,
             ]
         controller.set_rotor_speeds(rotor_speeds)
-        
-        while True:
 
+        while True:
             controller.apply_prop_force()
             controller.apply_wind_forces()
+            controller.constrain_to_pitch_rotation_only()
             controller.stabilize_orientation()
-
+            
             p.stepSimulation()
             time.sleep(1/300.0)
-
             try:
                 connection_info = p.getConnectionInfo()
                 if not connection_info['isConnected']:
                     print("Simulation disconnected - thread terminated")
                     break
-
                 if not p.isConnected():
                     print("GUI window closed - thread terminated")
                     break
-
                 keys = p.getKeyboardEvents()
                 cam_data = p.getDebugVisualizerCamera()
                 dist = cam_data[10]
                 yaw = cam_data[8]
                 pitch = cam_data[9]
                 target = list(cam_data[11]);
-
                 if ord('r') in keys and keys[ord('r')] & p.KEY_WAS_TRIGGERED:
-                    # Reset drone position and orientation
                     time.sleep(1.0)
                     rotor_speeds = [
                         -HOVER_SPEED,
@@ -643,32 +589,20 @@ def main():
                         HOVER_SPEED,
                     ]
                     controller.set_rotor_speeds(rotor_speeds)
-                    
                     controller.reset_drone()
-                    
-                    # Reset camera view
                     p.resetDebugVisualizerCamera(
                         cameraDistance=3.0,
                         cameraYaw=45.0,
                         cameraPitch=-30.0,
                         cameraTargetPosition=[0, 0, 0]
                     )
-                    
-                    # Reset rotor speeds to hover configuration
-                    
                     print("Drone and camera reset to initial position")
                     print(f"Drone position: {controller.initial_pos}")
-
                 if ord('l') in keys and keys[ord('l')] & p.KEY_WAS_TRIGGERED:
                     print("\nStarting RL training... (This will take several minutes)")
-                    if RL_AVAILABLE:
-                        model = controller.train_rl_policy(total_timesteps=50000)  # Start with 50k steps
-                        print("RL training complete!")
-                    else:
-                        print("Please install: pip install stable-baselines3 gymnasium")
-
+                    model = controller.train_rl_policy(total_timesteps=50000)
+                    print("RL training complete!")
                 time.sleep(1.0/240.0)
-
             except p.error as e:
                 print(f"PyBullet error: {e}")
                 print("Thread terminated due to error")
@@ -677,7 +611,6 @@ def main():
                 print(f"Unexpected error: {e}")
                 print("Thread terminated due to error")
                 break
-
     except KeyboardInterrupt:
         print("Simulation interrupted by user - thread terminated")
     finally:
