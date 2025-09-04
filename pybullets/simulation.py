@@ -9,6 +9,8 @@ import gymnasium as gym
 from gymnasium import spaces
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import EvalCallback
+import matplotlib.pyplot as plt  # NEW: For graphing
+from collections import defaultdict  # NEW: For data storage
 
 # --- TUNE THIS FOR HOVER ---
 HOVER_SPEED = 399.3   # target angular velocity (rad/s) per rotor, calculated from physics
@@ -43,9 +45,9 @@ class DroneController:
         self.orientation_integral = np.zeros(3)
         self.last_orientation_error = np.zeros(3)
         self.last_time = time.time()
-        self.Kp_slider = p.addUserDebugParameter("Kp", 0, 5.0, 1.0)
-        self.Ki_slider = p.addUserDebugParameter("Ki", 0, 1.0, 0.01)
-        self.Kd_slider = p.addUserDebugParameter("Kd", 0, 2.0, 0.5)
+        self.Kp_slider = p.addUserDebugParameter("Kp", 0, 5000.0, 1.0)
+        self.Ki_slider = p.addUserDebugParameter("Ki", 0, 5000.0, 0.01)
+        self.Kd_slider = p.addUserDebugParameter("Kd", 0, 2000.0, 0.5)
         self.wind_toggle = p.addUserDebugParameter("Wind On/Off", 0, 1, 0)
         self.wind_strength_slider = p.addUserDebugParameter("Wind Strength", 0, 5.0, 1.0)
         self.wind_enabled = False
@@ -53,6 +55,12 @@ class DroneController:
         self.wind_frequency = 0.5
         self.last_wind_update = time.time()
         self.current_wind = np.zeros(3)
+        
+        # NEW: Data recording variables for 10Hz recording
+        self.recording_data = defaultdict(list)
+        self.recording_start_time = time.time()
+        self.last_record_time = 0
+        self.record_interval = 0.1  # 10Hz = 0.1 second intervals
 
     def set_rotor_speeds(self, speeds):
         for joint_idx, speed in zip(ROTOR_JOINTS, speeds):
@@ -69,7 +77,7 @@ class DroneController:
         for joint_idx in ROTOR_JOINTS:
             joint_state = p.getJointState(self.drone_id, joint_idx)
             omega = joint_state[1]
-            thrust = motor_constant * omega**2
+            thrust = abs(motor_constant * omega**2)
             arm_state = p.getLinkState(self.drone_id, joint_idx, computeForwardKinematics=True, computeLinkVelocity=True)
             pos_world = arm_state[0]
             orientation_world = p.getMatrixFromQuaternion(arm_state[1])
@@ -117,12 +125,131 @@ class DroneController:
             flags=p.LINK_FRAME
         )
 
-    def stabilize_orientation(self, target_yaw = 0.0, target_roll = 0.0, target_pitch = 0.0):
+    def record_data(self, roll, pitch, yaw, rotor_speeds):
+        """Record data for graphing at 10Hz"""
+        current_time = time.time() - self.recording_start_time
+        
+        # Only record if enough time has passed (10Hz = 0.1 second intervals)
+        if current_time - self.last_record_time < self.record_interval:
+            return
+        
+        self.last_record_time = current_time
+        
+        self.recording_data['time'].append(current_time)
+        self.recording_data['roll'].append(roll)
+        self.recording_data['pitch'].append(pitch)
+        self.recording_data['yaw'].append(yaw)
+        self.recording_data['front_rotor'].append(rotor_speeds[0])
+        self.recording_data['left_rotor'].append(rotor_speeds[1])
+        self.recording_data['back_rotor'].append(rotor_speeds[2])
+        self.recording_data['right_rotor'].append(rotor_speeds[3])
+
+    def generate_final_graphs(self):
+        """Generate comprehensive graphs when simulation ends"""
+        if len(self.recording_data['time']) < 10:
+            print("Not enough data to generate graphs (need at least 10 data points)")
+            return
+        
+        print(f"\nGenerating final performance graphs with {len(self.recording_data['time'])} data points...")
+        
+        # Create figure with subplots (2x2 layout)
+        fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(16, 12))
+        fig.suptitle('Drone Performance Analysis - Complete Session', fontsize=16, fontweight='bold')
+        
+        times = np.array(self.recording_data['time'])
+        
+        # Plot 1: Roll vs Time with Front/Back Rotor Speeds
+        color_roll = 'tab:blue'
+        ax1.set_xlabel('Time (seconds)')
+        ax1.set_ylabel('Roll (degrees)', color=color_roll)
+        ax1.plot(times, np.degrees(self.recording_data['roll']), color=color_roll, linewidth=2, label='Roll')
+        ax1.tick_params(axis='y', labelcolor=color_roll)
+        ax1.grid(True, alpha=0.3)
+        ax1.set_title('Roll Control with Front/Back Rotor Response')
+        
+        # Secondary axis for front/back rotor speeds
+        ax1_rotor = ax1.twinx()
+        color_rotor = 'tab:red'
+        ax1_rotor.set_ylabel('Rotor Speed (rad/s)', color=color_rotor)
+        ax1_rotor.plot(times, self.recording_data['front_rotor'], '--', color='red', alpha=0.7, linewidth=1.5, label='Front Rotor')
+        ax1_rotor.plot(times, self.recording_data['back_rotor'], '--', color='darkred', alpha=0.7, linewidth=1.5, label='Back Rotor')
+        ax1_rotor.tick_params(axis='y', labelcolor=color_rotor)
+        ax1_rotor.legend(loc='upper right')
+        
+        # Plot 2: Pitch vs Time with Left/Right Rotor Speeds
+        color_pitch = 'tab:green'
+        ax2.set_xlabel('Time (seconds)')
+        ax2.set_ylabel('Pitch (degrees)', color=color_pitch)
+        ax2.plot(times, np.degrees(self.recording_data['pitch']), color=color_pitch, linewidth=2, label='Pitch')
+        ax2.tick_params(axis='y', labelcolor=color_pitch)
+        ax2.grid(True, alpha=0.3)
+        ax2.set_title('Pitch Control with Left/Right Rotor Response')
+        
+        # Secondary axis for left/right rotor speeds
+        ax2_rotor = ax2.twinx()
+        color_rotor2 = 'tab:orange'
+        ax2_rotor.set_ylabel('Rotor Speed (rad/s)', color=color_rotor2)
+        ax2_rotor.plot(times, self.recording_data['left_rotor'], '--', color='magenta', alpha=0.7, linewidth=1.5, label='Left Rotor')
+        ax2_rotor.plot(times, self.recording_data['right_rotor'], '--', color='cyan', alpha=0.7, linewidth=1.5, label='Right Rotor')
+        ax2_rotor.tick_params(axis='y', labelcolor=color_rotor2)
+        ax2_rotor.legend(loc='upper right')
+        
+        # Plot 3: Yaw vs Time
+        ax3.set_xlabel('Time (seconds)')
+        ax3.set_ylabel('Yaw (degrees)')
+        ax3.plot(times, np.degrees(self.recording_data['yaw']), 'tab:purple', linewidth=2)
+        ax3.grid(True, alpha=0.3)
+        ax3.set_title('Yaw Performance Over Time')
+        
+        # Plot 4: All Rotor Speeds Together
+        ax4.set_xlabel('Time (seconds)')
+        ax4.set_ylabel('Rotor Speed (rad/s)')
+        ax4.plot(times, self.recording_data['front_rotor'], 'r-', linewidth=2, label='Front Rotor', alpha=0.8)
+        ax4.plot(times, self.recording_data['left_rotor'], 'm-', linewidth=2, label='Left Rotor', alpha=0.8)
+        ax4.plot(times, self.recording_data['back_rotor'], 'g-', linewidth=2, label='Back Rotor', alpha=0.8)
+        ax4.plot(times, self.recording_data['right_rotor'], 'c-', linewidth=2, label='Right Rotor', alpha=0.8)
+        ax4.grid(True, alpha=0.3)
+        ax4.legend(loc='best')
+        ax4.set_title('All Rotor Speeds')
+        
+        # Add statistics
+        roll_std = np.std(np.degrees(self.recording_data['roll']))
+        pitch_std = np.std(np.degrees(self.recording_data['pitch']))
+        yaw_std = np.std(np.degrees(self.recording_data['yaw']))
+        duration = times[-1] if len(times) > 0 else 0
+        
+        # Add comprehensive stats text
+        stats_text = (f'Session Duration: {duration:.1f}s | Data Points: {len(times)} | '
+                     f'Roll σ: {roll_std:.2f}° | Pitch σ: {pitch_std:.2f}° | Yaw σ: {yaw_std:.2f}°')
+        fig.text(0.5, 0.02, stats_text, ha='center', fontsize=11, style='italic')
+        
+        plt.tight_layout()
+        plt.subplots_adjust(bottom=0.08)  # Make room for stats
+        
+        # Save the graph with timestamp
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        filename = f'drone_complete_session_{timestamp}.png'
+        plt.savefig(filename, dpi=300, bbox_inches='tight')
+        print(f"Complete session graph saved as '{filename}'")
+        print(f"Graph saved in directory: {os.getcwd()}")
+        
+        # Show the graph and keep it open
+        plt.show(block=True)  # Block=True keeps the window open
+        
+        return filename
+
+    def reset_recording(self):
+        """Reset recording data for new run"""
+        self.recording_data = defaultdict(list)
+        self.recording_start_time = time.time()
+        self.last_record_time = 0
+
+    def stabilize_orientation(self, target_yaw=0.0, target_roll=0.0, target_pitch=0.0):
         current_time = time.time()
         dt = current_time - self.last_time
         _, orientation = p.getBasePositionAndOrientation(self.drone_id)
         curr_rotation = R.from_quat(orientation)
-        roll, pitch, yaw = curr_rotation.as_euler('xyz', degrees = False)
+        roll, pitch, yaw = curr_rotation.as_euler('xyz', degrees=False)
         orientation_error = np.array([
             target_roll - roll,
             target_pitch - pitch,
@@ -146,20 +273,19 @@ class DroneController:
         yaw_correction = pid_output[2]
         base_speed = HOVER_SPEED
 
-    
-        # Correction: For pitch, front and back should be opposite
-        # So, front: base - pitch_correction, back: base + pitch_correction
-        # For roll, left: base - roll_correction, right: base + roll_correction
         rotor_speeds = [
-            -(base_speed - pitch_correction + roll_correction + yaw_correction),  # Front
-            base_speed + pitch_correction - roll_correction + yaw_correction,  # Left
-            -(base_speed + pitch_correction + roll_correction + yaw_correction),  # Back
-            base_speed - pitch_correction - roll_correction + yaw_correction   # Right
+            -(base_speed - pitch_correction + yaw_correction),  # Front (no roll)
+            base_speed - roll_correction + yaw_correction,      # Left (no pitch)  
+            -(base_speed + pitch_correction + yaw_correction),  # Back (no roll)
+            base_speed + roll_correction + yaw_correction       # Right (no pitch)
         ]
 
         rotor_speeds = np.clip(rotor_speeds, -2000, 2000)
         self.set_rotor_speeds(rotor_speeds)
         self.last_orientation_error = orientation_error
+
+        # NEW: Record data at 10Hz
+        self.record_data(roll, pitch, yaw, rotor_speeds)
 
         # Print one updating line (no new lines)
         print(
@@ -171,6 +297,10 @@ class DroneController:
         self.last_time = current_time
 
     def reset_drone(self):
+        # NEW: Generate graphs before resetting
+        print("\nGenerating performance graphs...")
+        
+        
         p.removeBody(self.drone_id)
         script_dir = os.path.dirname(os.path.realpath(__file__))
         urdf_dir = os.path.join(script_dir, "urdf")
@@ -179,6 +309,9 @@ class DroneController:
         self.orientation_integral = np.zeros(3)
         self.last_orientation_error = np.zeros(3)
         self.last_time = time.time()
+        
+        # NEW: Reset recording for new run
+        self.reset_recording()
 
     def train_rl_policy(self, total_timesteps=100000):
         """Train RL policy to find optimal PID parameters"""
@@ -255,269 +388,6 @@ class DroneController:
         print(f"Steps survived: {step_count}")
         print(f"Final PID gains: Kp={final_pid[0]:.3f}, Ki={final_pid[1]:.3f}, Kd={final_pid[2]:.3f}")
 
-    def constrain_to_pitch_rotation_only(self):
-        """
-        Constrain the drone to only rotate around the Y axis (pitch) and prevent translation.
-        This function fixes the drone at [0, 0, 1] and zeroes roll/yaw, but does NOT perform stabilization.
-        Call this in the main simulation loop before or after stabilize_orientation().
-        """
-        _, orientation = p.getBasePositionAndOrientation(self.drone_id)
-        curr_rotation = R.from_quat(orientation)
-        _, pitch, _ = curr_rotation.as_euler('xyz', degrees=False)
-        # Set orientation to only pitch, fix position
-        new_orientation = p.getQuaternionFromEuler([0, pitch, 0])
-        p.resetBasePositionAndOrientation(self.drone_id, [0, 0, 1], new_orientation)
-
-class DroneStabilizationEnv(gym.Env):
-    def __init__(self, controller):
-        super(DroneStabilizationEnv, self).__init__()
-        
-        self.controller = controller
-        self.max_episode_steps = 3600  # 15 seconds at 240Hz (updated from 1200)
-        self.step_count = 0
-        
-        # Define action space - PID parameter adjustments
-        # Actions: [ΔKp, ΔKi, ΔKd] - same adjustment for all axes
-        self.action_space = spaces.Box(
-            low=np.array([-0.1, -0.01, -0.05]),   # Maximum decrease per step
-            high=np.array([0.1, 0.01, 0.05]),     # Maximum increase per step
-            dtype=np.float32
-        )
-        
-        # Define observation space
-        self.observation_space = spaces.Box(
-            low=-np.inf,
-            high=np.inf,
-            shape=(21,),  # Increased from 15 to 21 (added 6 position/velocity terms)
-            dtype=np.float32
-        )
-        
-        # PID parameter bounds
-        self.kp_bounds = [0.01, 2.0]
-        self.ki_bounds = [0.0, 0.5]
-        self.kd_bounds = [0.0, 1.0]
-        
-        # Episode tracking
-        self.episode_reward = 0
-        self.best_performance = -np.inf
-        
-        # Fixed target orientation - always level
-        self.target_roll = 0.0
-        self.target_pitch = 0.0
-        self.target_yaw = 0.0
-        
-        # Starting orientation randomization
-        self.max_start_angle = np.radians(5)  # 5 degrees in radians
-        self.min_start_angle = np.radians(1)  # 1 degree minimum in radians
-        
-    def reset(self, seed=None):
-        """Reset the environment"""
-        super().reset(seed=seed)
-        
-        # Reset drone first
-        self.controller.reset_drone()
-        time.sleep(0.1)  # Let physics settle
-        
-        # Generate random starting orientation within ±1 to ±5 degrees
-        def random_angle():
-            # Generate random angle with minimum magnitude
-            sign = np.random.choice([-1, 1])
-            magnitude = np.random.uniform(self.min_start_angle, self.max_start_angle)
-            return sign * magnitude
-        
-        random_roll = random_angle()
-        random_pitch = random_angle()
-        random_yaw = random_angle()
-        
-        # Apply random starting orientation
-        random_orientation = p.getQuaternionFromEuler([random_roll, random_pitch, random_yaw])
-        p.resetBasePositionAndOrientation(
-            self.controller.drone_id, 
-            self.controller.initial_pos, 
-            random_orientation
-        )
-        
-        print(f"\nEpisode start - Roll: {np.degrees(random_roll):.1f}°, Pitch: {np.degrees(random_pitch):.1f}°, Yaw: {np.degrees(random_yaw):.1f}°")
-        
-        # Initialize PID parameters randomly within reasonable bounds
-        self.controller.Kp_orientation = np.array([
-            np.random.uniform(0.05, 0.3), 
-            np.random.uniform(0.05, 0.3), 
-            np.random.uniform(0.05, 0.3)
-        ])
-        self.controller.Ki_orientation = np.array([0.0, 0.0, 0.0])  # Start with no integral
-        self.controller.Kd_orientation = np.array([
-            np.random.uniform(0.01, 0.1), 
-            np.random.uniform(0.01, 0.1), 
-            np.random.uniform(0.01, 0.1)
-        ])
-        
-        # Reset controller state
-        self.controller.orientation_integral = np.zeros(3)
-        self.controller.last_orientation_error = np.zeros(3)
-        self.controller.last_time = time.time()
-        
-        self.step_count = 0
-        self.episode_reward = 0
-        
-        return self._get_observation(), {}
-    
-    def _get_observation(self):
-        """Get current state observation - INCLUDING POSITION"""
-        # Get drone state
-        pos, orientation = p.getBasePositionAndOrientation(self.controller.drone_id)
-        lin_vel, ang_vel = p.getBaseVelocity(self.controller.drone_id)
-        
-        # Convert orientation to euler angles
-        curr_rotation = R.from_quat(orientation)
-        roll, pitch, yaw = curr_rotation.as_euler('xyz', degrees=False)
-        
-        # Calculate orientation errors (target is always level - fixed)
-        roll_error = self.target_roll - roll
-        pitch_error = self.target_pitch - pitch
-        yaw_error = self.target_yaw - yaw
-        
-        # Calculate position errors
-        target_pos = [0.0, 0.0, 1.0]  # Stay at origin, 1m height
-        pos_error_x = target_pos[0] - pos[0]
-        pos_error_y = target_pos[1] - pos[1] 
-        pos_error_z = target_pos[2] - pos[2]
-        
-        # Get current PID parameters (average across axes)
-        current_kp = np.mean(self.controller.Kp_orientation)
-        current_ki = np.mean(self.controller.Ki_orientation)  
-        current_kd = np.mean(self.controller.Kd_orientation)
-        
-        observation = np.array([
-            # Orientation state (9 values)
-            roll, pitch, yaw,                                    # Current orientation
-            ang_vel[0], ang_vel[1], ang_vel[2],                 # Angular velocities
-            roll_error, pitch_error, yaw_error,                 # Orientation errors
-            
-            # Position state (6 values) - NEW
-            pos[0], pos[1], pos[2],                             # Current position
-            pos_error_x, pos_error_y, pos_error_z,              # Position errors
-            
-            # Controller state (6 values)
-            self.controller.orientation_integral[0],             # Integral terms
-            self.controller.orientation_integral[1],
-            self.controller.orientation_integral[2],
-            current_kp, current_ki, current_kd                  # Current PID gains
-        ], dtype=np.float32)
-        
-        return observation
-    
-    def step(self, action):
-        """Execute one environment step"""
-        # Apply PID parameter adjustments
-        delta_kp, delta_ki, delta_kd = action
-        
-        # Update PID parameters (same adjustment for all axes)
-        new_kp = np.clip(
-            self.controller.Kp_orientation + delta_kp,
-            self.kp_bounds[0], self.kp_bounds[1]
-        )
-        new_ki = np.clip(
-            self.controller.Ki_orientation + delta_ki,
-            self.ki_bounds[0], self.ki_bounds[1]
-        )
-        new_kd = np.clip(
-            self.controller.Kd_orientation + delta_kd,
-            self.kd_bounds[0], self.kd_bounds[1]
-        )
-        
-        self.controller.Kp_orientation = new_kp
-        self.controller.Ki_orientation = new_ki
-        self.controller.Kd_orientation = new_kd
-        
-        # Run simulation for multiple physics steps per RL step
-        steps_per_action = 12  # 0.05 seconds at 240Hz
-        
-        total_reward = 0
-        for _ in range(steps_per_action):
-            # Apply drone control with FIXED target orientation (always level)
-            self.controller.apply_prop_force()
-            self.controller.apply_wind_forces()
-            self.controller.stabilize_orientation(
-                target_roll=self.target_roll,
-                target_pitch=self.target_pitch, 
-                target_yaw=self.target_yaw
-            )
-            p.stepSimulation()
-            
-            # Calculate reward for this physics step
-            step_reward = self._calculate_reward()
-            total_reward += step_reward
-            
-            # Check if episode should terminate
-            terminated = self._check_termination()
-            if terminated:
-                break
-        
-        self.step_count += 1
-        self.episode_reward += total_reward
-        
-        # Check if episode is done
-        truncated = self.step_count >= self.max_episode_steps
-        done = terminated or truncated
-        
-        observation = self._get_observation()
-        
-        info = {
-            'episode_reward': self.episode_reward,
-            'step_count': self.step_count,
-            'current_pid': [np.mean(new_kp), np.mean(new_ki), np.mean(new_kd)]
-        }
-        
-        return observation, total_reward, done, truncated, info
-    
-    def _calculate_reward(self):
-        """Calculate reward for current state"""
-        # Get current state
-        pos, orientation = p.getBasePositionAndOrientation(self.controller.drone_id)
-        _, ang_vel = p.getBaseVelocity(self.controller.drone_id)
-        
-        # Convert to euler angles
-        curr_rotation = R.from_quat(orientation)
-        roll, pitch, yaw = curr_rotation.as_euler('xyz', degrees=False)
-        
-        # Primary reward: Orientation stability (average roll and pitch as requested)
-        avg_tilt = (abs(roll) + abs(pitch)) / 2.0
-        orientation_reward = -avg_tilt * 10  # Negative because we want to minimize tilt
-        
-        # Secondary rewards
-        yaw_stability = -abs(yaw) * 2  # Less weight on yaw
-        altitude_maintenance = -abs(pos[2] - 1.0) * 5  # Stay at 1m height
-        horizontal_drift = -(pos[0]**2 + pos[1]**2) * 2  # Stay centered
-        
-        # Control smoothness (penalize excessive angular velocities)
-        angular_velocity_penalty = -(abs(ang_vel[0]) + abs(ang_vel[1]) + abs(ang_vel[2])) * 0.5
-        
-        # Efficiency bonus (reward for using reasonable PID gains)
-        kp_avg = np.mean(self.controller.Kp_orientation)
-        efficiency_bonus = -abs(kp_avg - 0.2) * 0.1  # Encourage gains around 0.2
-        
-        # Combine all rewards
-        total_reward = (orientation_reward + yaw_stability + altitude_maintenance + 
-                       horizontal_drift + angular_velocity_penalty + efficiency_bonus)
-        
-        return total_reward
-    
-    def _check_termination(self):
-        """Check if episode should terminate early"""
-        pos, orientation = p.getBasePositionAndOrientation(self.controller.drone_id)
-        
-        # Termination conditions
-        crashed = pos[2] < 0.1  # Too low
-        flew_away_vertical = pos[2] > 4.0  # Too high
-        flew_away_horizontal = abs(pos[0]) > 5.0 or abs(pos[1]) > 5.0  # Too far horizontally
-        
-        # Severe orientation failure
-        curr_rotation = R.from_quat(orientation)
-        roll, pitch, yaw = curr_rotation.as_euler('xyz', degrees=False)
-        severe_tilt = abs(roll) > 1.0 or abs(pitch) > 1.0  # More than ~60 degrees
-        
-        return crashed or flew_away_vertical or flew_away_horizontal or severe_tilt
 
 def main():
     physicsClient = p.connect(p.GUI_SERVER)
@@ -548,8 +418,10 @@ def main():
     p.setGravity(0, 0, -9.81)
     p.setRealTimeSimulation(0)
     controller = DroneController(drone_id)
+    
     try:
         print("Starting simulation loop...")
+        print("Press 'R' to reset drone | Close window to generate final graphs")
         rotor_speeds = [
                 -HOVER_SPEED,
                 HOVER_SPEED,
@@ -561,27 +433,27 @@ def main():
         while True:
             controller.apply_prop_force()
             controller.apply_wind_forces()
-            controller.constrain_to_pitch_rotation_only()
             controller.stabilize_orientation()
             
             p.stepSimulation()
-            time.sleep(1/300.0)
+            time.sleep(1/240)
+            
             try:
                 connection_info = p.getConnectionInfo()
                 if not connection_info['isConnected']:
-                    print("Simulation disconnected - thread terminated")
+                    print("\nSimulation window closed - generating final graphs...")
+                    controller.generate_final_graphs()
                     break
+                    
                 if not p.isConnected():
-                    print("GUI window closed - thread terminated")
+                    print("\nPyBullet disconnected - generating final graphs...")
+                    controller.generate_final_graphs()
                     break
+                
                 keys = p.getKeyboardEvents()
-                cam_data = p.getDebugVisualizerCamera()
-                dist = cam_data[10]
-                yaw = cam_data[8]
-                pitch = cam_data[9]
-                target = list(cam_data[11]);
+                
                 if ord('r') in keys and keys[ord('r')] & p.KEY_WAS_TRIGGERED:
-                    time.sleep(1.0)
+                    print("\nResetting drone...")
                     rotor_speeds = [
                         -HOVER_SPEED,
                         HOVER_SPEED,
@@ -596,23 +468,29 @@ def main():
                         cameraPitch=-30.0,
                         cameraTargetPosition=[0, 0, 0]
                     )
-                    print("Drone and camera reset to initial position")
-                    print(f"Drone position: {controller.initial_pos}")
+                    print("Drone reset and recording restarted")
+                    
                 if ord('l') in keys and keys[ord('l')] & p.KEY_WAS_TRIGGERED:
                     print("\nStarting RL training... (This will take several minutes)")
                     model = controller.train_rl_policy(total_timesteps=50000)
                     print("RL training complete!")
-                time.sleep(1.0/240.0)
+                    
             except p.error as e:
-                print(f"PyBullet error: {e}")
-                print("Thread terminated due to error")
+                print(f"\nPyBullet error: {e}")
+                print("Generating final graphs before exit...")
+                controller.generate_final_graphs()
                 break
             except Exception as e:
-                print(f"Unexpected error: {e}")
-                print("Thread terminated due to error")
+                print(f"\nUnexpected error: {e}")
+                print("Generating final graphs before exit...")
+                controller.generate_final_graphs()
                 break
+                
     except KeyboardInterrupt:
-        print("Simulation interrupted by user - thread terminated")
+        print("\nSimulation interrupted by user")
+        print("Generating final graphs...")
+        controller.generate_final_graphs()
+        
     finally:
         try:
             if p.isConnected():
@@ -623,7 +501,7 @@ def main():
                 print("PyBullet already disconnected")
         except Exception as e:
             print(f"Error during cleanup: {e}")
-        print("Simulation thread fully terminated")
+        print("Simulation fully terminated")
 
 if __name__ == "__main__":
     main()
