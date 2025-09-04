@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt  # NEW: For graphing
 from collections import defaultdict  # NEW: For data storage
 
 # --- TUNE THIS FOR HOVER ---
-HOVER_SPEED = 399.3   # target angular velocity (rad/s) per rotor, calculated from physics
+HOVER_SPEED = 399   # target angular velocity (rad/s) per rotor, calculated from physics
 MAX_FORCE   = 1000.0   # max torque each motor can apply (increased to allow motors to reach target speed)
 
 FRONT_ROTOR = 1  
@@ -274,8 +274,8 @@ class DroneController:
         base_speed = HOVER_SPEED
 
         rotor_speeds = [
-            -(base_speed - pitch_correction + yaw_correction),  # Front (no roll)
-            base_speed - roll_correction + yaw_correction,      # Left (no pitch)  
+            -(base_speed + pitch_correction + yaw_correction),  # Front (no roll)
+            base_speed + roll_correction + yaw_correction,      # Left (no pitch)  
             -(base_speed + pitch_correction + yaw_correction),  # Back (no roll)
             base_speed + roll_correction + yaw_correction       # Right (no pitch)
         ]
@@ -429,6 +429,8 @@ def main():
                 HOVER_SPEED,
             ]
         controller.set_rotor_speeds(rotor_speeds)
+        for j in range(p.getNumJoints(drone_id)):
+            print(j, p.getJointInfo(drone_id, j)[12].decode())
 
         while True:
             controller.apply_prop_force()
