@@ -45,9 +45,9 @@ class DroneController:
         self.orientation_integral = np.zeros(3)
         self.last_orientation_error = np.zeros(3)
         self.last_time = time.time()
-        self.Kp_slider = p.addUserDebugParameter("Kp", 0, 5000.0, 1.0)
-        self.Ki_slider = p.addUserDebugParameter("Ki", 0, 5000.0, 0.01)
-        self.Kd_slider = p.addUserDebugParameter("Kd", 0, 2000.0, 0.5)
+        self.Kp_slider = p.addUserDebugParameter("Kp", 0, 50.0, 50.0)
+        self.Ki_slider = p.addUserDebugParameter("Ki", 0, 50.0, 0.01)
+        self.Kd_slider = p.addUserDebugParameter("Kd", 0, 20.0, 1.0)
         self.wind_toggle = p.addUserDebugParameter("Wind On/Off", 0, 1, 0)
         self.wind_strength_slider = p.addUserDebugParameter("Wind Strength", 0, 5.0, 1.0)
         self.wind_enabled = False
@@ -149,15 +149,15 @@ class DroneController:
         if len(self.recording_data['time']) < 10:
             print("Not enough data to generate graphs (need at least 10 data points)")
             return
-        
+
         print(f"\nGenerating final performance graphs with {len(self.recording_data['time'])} data points...")
-        
+
         # Create figure with subplots (2x2 layout)
         fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(16, 12))
         fig.suptitle('Drone Performance Analysis - Complete Session', fontsize=16, fontweight='bold')
-        
+
         times = np.array(self.recording_data['time'])
-        
+
         # Plot 1: Roll vs Time with Front/Back Rotor Speeds
         color_roll = 'tab:blue'
         ax1.set_xlabel('Time (seconds)')
@@ -166,7 +166,7 @@ class DroneController:
         ax1.tick_params(axis='y', labelcolor=color_roll)
         ax1.grid(True, alpha=0.3)
         ax1.set_title('Roll Control with Front/Back Rotor Response')
-        
+
         # Secondary axis for front/back rotor speeds
         ax1_rotor = ax1.twinx()
         color_rotor = 'tab:red'
@@ -175,7 +175,7 @@ class DroneController:
         ax1_rotor.plot(times, self.recording_data['back_rotor'], '--', color='darkred', alpha=0.7, linewidth=1.5, label='Back Rotor')
         ax1_rotor.tick_params(axis='y', labelcolor=color_rotor)
         ax1_rotor.legend(loc='upper right')
-        
+
         # Plot 2: Pitch vs Time with Left/Right Rotor Speeds
         color_pitch = 'tab:green'
         ax2.set_xlabel('Time (seconds)')
@@ -184,7 +184,7 @@ class DroneController:
         ax2.tick_params(axis='y', labelcolor=color_pitch)
         ax2.grid(True, alpha=0.3)
         ax2.set_title('Pitch Control with Left/Right Rotor Response')
-        
+
         # Secondary axis for left/right rotor speeds
         ax2_rotor = ax2.twinx()
         color_rotor2 = 'tab:orange'
@@ -193,14 +193,14 @@ class DroneController:
         ax2_rotor.plot(times, self.recording_data['right_rotor'], '--', color='cyan', alpha=0.7, linewidth=1.5, label='Right Rotor')
         ax2_rotor.tick_params(axis='y', labelcolor=color_rotor2)
         ax2_rotor.legend(loc='upper right')
-        
+
         # Plot 3: Yaw vs Time
         ax3.set_xlabel('Time (seconds)')
         ax3.set_ylabel('Yaw (degrees)')
         ax3.plot(times, np.degrees(self.recording_data['yaw']), 'tab:purple', linewidth=2)
         ax3.grid(True, alpha=0.3)
         ax3.set_title('Yaw Performance Over Time')
-        
+
         # Plot 4: All Rotor Speeds Together
         ax4.set_xlabel('Time (seconds)')
         ax4.set_ylabel('Rotor Speed (rad/s)')
@@ -211,32 +211,30 @@ class DroneController:
         ax4.grid(True, alpha=0.3)
         ax4.legend(loc='best')
         ax4.set_title('All Rotor Speeds')
-        
+
         # Add statistics
         roll_std = np.std(np.degrees(self.recording_data['roll']))
         pitch_std = np.std(np.degrees(self.recording_data['pitch']))
         yaw_std = np.std(np.degrees(self.recording_data['yaw']))
         duration = times[-1] if len(times) > 0 else 0
-        
+
         # Add comprehensive stats text
         stats_text = (f'Session Duration: {duration:.1f}s | Data Points: {len(times)} | '
                      f'Roll σ: {roll_std:.2f}° | Pitch σ: {pitch_std:.2f}° | Yaw σ: {yaw_std:.2f}°')
         fig.text(0.5, 0.02, stats_text, ha='center', fontsize=11, style='italic')
-        
+
         plt.tight_layout()
         plt.subplots_adjust(bottom=0.08)  # Make room for stats
-        
-        # Save the graph with timestamp
-        timestamp = time.strftime("%Y%m%d_%H%M%S")
-        filename = f'drone_complete_session_{timestamp}.png'
-        plt.savefig(filename, dpi=300, bbox_inches='tight')
-        print(f"Complete session graph saved as '{filename}'")
-        print(f"Graph saved in directory: {os.getcwd()}")
-        
+
+        # REMOVE: Do not save the graph as a file
+        # plt.savefig(filename, dpi=300, bbox_inches='tight')
+        # print(f"Complete session graph saved as '{filename}'")
+        # print(f"Graph saved in directory: {os.getcwd()}")
+
         # Show the graph and keep it open
         plt.show(block=True)  # Block=True keeps the window open
-        
-        return filename
+
+        return
 
     def reset_recording(self):
         """Reset recording data for new run"""
@@ -275,9 +273,9 @@ class DroneController:
 
         rotor_speeds = [
             -(base_speed + pitch_correction + yaw_correction),  # Front (no roll)
-            base_speed + roll_correction + yaw_correction,      # Left (no pitch)  
+            base_speed + roll_correction - yaw_correction,      # Left (no pitch)  
             -(base_speed + pitch_correction + yaw_correction),  # Back (no roll)
-            base_speed + roll_correction + yaw_correction       # Right (no pitch)
+            base_speed + roll_correction - yaw_correction       # Right (no pitch)
         ]
 
         rotor_speeds = np.clip(rotor_speeds, -2000, 2000)
