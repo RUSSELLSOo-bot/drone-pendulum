@@ -45,9 +45,9 @@ class DroneController:
         self.orientation_integral = np.zeros(3)
         self.last_orientation_error = np.zeros(3)
         self.last_time = time.time()
-        self.Kp_slider = p.addUserDebugParameter("Kp", 0, 50.0, 1.0)
-        self.Ki_slider = p.addUserDebugParameter("Ki", 0, 50.0, 0.01)
-        self.Kd_slider = p.addUserDebugParameter("Kd", 0, 20.0, 1.0)
+        self.Kp_slider = p.addUserDebugParameter("Kp", 0, 5.0, 1.0)
+        self.Ki_slider = p.addUserDebugParameter("Ki", 0, 20.0, 10.0)
+        self.Kd_slider = p.addUserDebugParameter("Kd", 0, 5.0, 1.50)
         self.wind_toggle = p.addUserDebugParameter("Wind On/Off", 0, 1, 0)
         self.wind_strength_slider = p.addUserDebugParameter("Wind Strength", 0, 5.0, 1.0)
         self.wind_enabled = False
