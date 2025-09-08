@@ -45,7 +45,7 @@ class DroneController:
         self.orientation_integral = np.zeros(3)
         self.last_orientation_error = np.zeros(3)
         self.last_time = time.time()
-        self.Kp_slider = p.addUserDebugParameter("Kp", 0, 50.0, 50.0)
+        self.Kp_slider = p.addUserDebugParameter("Kp", 0, 50.0, 1.0)
         self.Ki_slider = p.addUserDebugParameter("Ki", 0, 50.0, 0.01)
         self.Kd_slider = p.addUserDebugParameter("Kd", 0, 20.0, 1.0)
         self.wind_toggle = p.addUserDebugParameter("Wind On/Off", 0, 1, 0)
@@ -158,56 +158,56 @@ class DroneController:
 
         times = np.array(self.recording_data['time'])
 
-        # Plot 1: Roll vs Time with Front/Back Rotor Speeds
+        # FIXED: Plot 1: Roll vs Time with LEFT/RIGHT Rotor Speeds (X-axis rotation)
         color_roll = 'tab:blue'
         ax1.set_xlabel('Time (seconds)')
         ax1.set_ylabel('Roll (degrees)', color=color_roll)
         ax1.plot(times, np.degrees(self.recording_data['roll']), color=color_roll, linewidth=2, label='Roll')
         ax1.tick_params(axis='y', labelcolor=color_roll)
         ax1.grid(True, alpha=0.3)
-        ax1.set_title('Roll Control with Front/Back Rotor Response')
+        ax1.set_title('Roll Control with Left/Right Rotor Response')
 
-        # Secondary axis for front/back rotor speeds
+        # Secondary axis for LEFT/RIGHT rotor speeds (controls roll)
         ax1_rotor = ax1.twinx()
         color_rotor = 'tab:red'
         ax1_rotor.set_ylabel('Rotor Speed (rad/s)', color=color_rotor)
-        ax1_rotor.plot(times, self.recording_data['front_rotor'], '--', color='red', alpha=0.7, linewidth=1.5, label='Front Rotor')
-        ax1_rotor.plot(times, self.recording_data['back_rotor'], '--', color='darkred', alpha=0.7, linewidth=1.5, label='Back Rotor')
+        ax1_rotor.plot(times, np.abs(self.recording_data['left_rotor']), '--', color='magenta', alpha=0.7, linewidth=1.5, label='Left Rotor')
+        ax1_rotor.plot(times, np.abs(self.recording_data['right_rotor']), '--', color='cyan', alpha=0.7, linewidth=1.5, label='Right Rotor')
         ax1_rotor.tick_params(axis='y', labelcolor=color_rotor)
         ax1_rotor.legend(loc='upper right')
 
-        # Plot 2: Pitch vs Time with Left/Right Rotor Speeds
+        # FIXED: Plot 2: Pitch vs Time with FRONT/BACK Rotor Speeds (Y-axis rotation)
         color_pitch = 'tab:green'
         ax2.set_xlabel('Time (seconds)')
         ax2.set_ylabel('Pitch (degrees)', color=color_pitch)
         ax2.plot(times, np.degrees(self.recording_data['pitch']), color=color_pitch, linewidth=2, label='Pitch')
         ax2.tick_params(axis='y', labelcolor=color_pitch)
         ax2.grid(True, alpha=0.3)
-        ax2.set_title('Pitch Control with Left/Right Rotor Response')
+        ax2.set_title('Pitch Control with Front/Back Rotor Response')
 
-        # Secondary axis for left/right rotor speeds
+        # Secondary axis for FRONT/BACK rotor speeds (controls pitch)
         ax2_rotor = ax2.twinx()
         color_rotor2 = 'tab:orange'
         ax2_rotor.set_ylabel('Rotor Speed (rad/s)', color=color_rotor2)
-        ax2_rotor.plot(times, self.recording_data['left_rotor'], '--', color='magenta', alpha=0.7, linewidth=1.5, label='Left Rotor')
-        ax2_rotor.plot(times, self.recording_data['right_rotor'], '--', color='cyan', alpha=0.7, linewidth=1.5, label='Right Rotor')
+        ax2_rotor.plot(times, np.abs(self.recording_data['front_rotor']), '--', color='red', alpha=0.7, linewidth=1.5, label='Front Rotor')
+        ax2_rotor.plot(times, np.abs(self.recording_data['back_rotor']), '--', color='darkred', alpha=0.7, linewidth=1.5, label='Back Rotor')
         ax2_rotor.tick_params(axis='y', labelcolor=color_rotor2)
         ax2_rotor.legend(loc='upper right')
 
-        # Plot 3: Yaw vs Time
+        # Plot 3: Yaw vs Time (unchanged)
         ax3.set_xlabel('Time (seconds)')
         ax3.set_ylabel('Yaw (degrees)')
         ax3.plot(times, np.degrees(self.recording_data['yaw']), 'tab:purple', linewidth=2)
         ax3.grid(True, alpha=0.3)
         ax3.set_title('Yaw Performance Over Time')
 
-        # Plot 4: All Rotor Speeds Together
+        # Plot 4: All Rotor Speeds Together (unchanged)
         ax4.set_xlabel('Time (seconds)')
         ax4.set_ylabel('Rotor Speed (rad/s)')
-        ax4.plot(times, self.recording_data['front_rotor'], 'r-', linewidth=2, label='Front Rotor', alpha=0.8)
-        ax4.plot(times, self.recording_data['left_rotor'], 'm-', linewidth=2, label='Left Rotor', alpha=0.8)
-        ax4.plot(times, self.recording_data['back_rotor'], 'g-', linewidth=2, label='Back Rotor', alpha=0.8)
-        ax4.plot(times, self.recording_data['right_rotor'], 'c-', linewidth=2, label='Right Rotor', alpha=0.8)
+        ax4.plot(times, np.abs(self.recording_data['front_rotor']), 'r-', linewidth=2, label='Front Rotor', alpha=0.8)
+        ax4.plot(times, np.abs(self.recording_data['left_rotor']), 'm-', linewidth=2, label='Left Rotor', alpha=0.8)
+        #ax4.plot(times, np.abs(self.recording_data['back_rotor']), 'g-', linewidth=2, label='Back Rotor', alpha=0.8)
+        #ax4.plot(times, np.abs(self.recording_data['right_rotor']), 'c-', linewidth=2, label='Right Rotor', alpha=0.8)
         ax4.grid(True, alpha=0.3)
         ax4.legend(loc='best')
         ax4.set_title('All Rotor Speeds')
@@ -226,11 +226,6 @@ class DroneController:
         plt.tight_layout()
         plt.subplots_adjust(bottom=0.08)  # Make room for stats
 
-        # REMOVE: Do not save the graph as a file
-        # plt.savefig(filename, dpi=300, bbox_inches='tight')
-        # print(f"Complete session graph saved as '{filename}'")
-        # print(f"Graph saved in directory: {os.getcwd()}")
-
         # Show the graph and keep it open
         plt.show(block=True)  # Block=True keeps the window open
 
@@ -248,44 +243,55 @@ class DroneController:
         _, orientation = p.getBasePositionAndOrientation(self.drone_id)
         curr_rotation = R.from_quat(orientation)
         roll, pitch, yaw = curr_rotation.as_euler('xyz', degrees=False)
+        
         orientation_error = np.array([
             target_roll - roll,
             target_pitch - pitch,
             target_yaw - yaw
         ])
+        
         self.orientation_integral += orientation_error * dt
         MAX_INTEGRAL = 2.0
         self.orientation_integral = np.clip(self.orientation_integral, -MAX_INTEGRAL, MAX_INTEGRAL)
+        
+        # Get SINGLE set of PID gains from sliders
         kp = p.readUserDebugParameter(self.Kp_slider)
         ki = p.readUserDebugParameter(self.Ki_slider)
         kd = p.readUserDebugParameter(self.Kd_slider)
-        self.Kp_orientation = np.array([kp, kp, kp])
-        self.Ki_orientation = np.array([ki, ki, ki])
-        self.Kd_orientation = np.array([kd, kd, kd])
+        
+        # Get derivative (angular velocity)
         deriv_error = -(np.array(p.getBaseVelocity(self.drone_id)[1]))
-        pid_output = (self.Kp_orientation * orientation_error +
-                     self.Ki_orientation * self.orientation_integral +
-                     self.Kd_orientation * deriv_error)
-        roll_correction = pid_output[0]
-        pitch_correction = pid_output[1]
-        yaw_correction = pid_output[2]
+        
+        # CORRECTED: Apply SAME PID gains to each axis individually
+        roll_correction = (kp * orientation_error[0] + 
+                          ki * self.orientation_integral[0] + 
+                          kd * deriv_error[0])
+        
+        pitch_correction = (kp * orientation_error[1] + 
+                           ki * self.orientation_integral[1] + 
+                           kd * deriv_error[1])
+        
+        yaw_correction = (kp * orientation_error[2] + 
+                         ki * self.orientation_integral[2] + 
+                         kd * deriv_error[2])
+        
         base_speed = HOVER_SPEED
 
         rotor_speeds = [
             -(base_speed + pitch_correction + yaw_correction),  # Front (no roll)
-            base_speed + roll_correction - yaw_correction,      # Left (no pitch)  
-            -(base_speed + pitch_correction + yaw_correction),  # Back (no roll)
-            base_speed + roll_correction - yaw_correction       # Right (no pitch)
+            base_speed - roll_correction + yaw_correction,      # Left (no pitch)  
+            -(base_speed - pitch_correction + yaw_correction),  # Back (no roll)
+            base_speed + roll_correction + yaw_correction       # Right (no pitch)
         ]
 
         rotor_speeds = np.clip(rotor_speeds, -2000, 2000)
         self.set_rotor_speeds(rotor_speeds)
         self.last_orientation_error = orientation_error
 
-        # NEW: Record data at 10Hz
+        # Record data at 10Hz
         self.record_data(roll, pitch, yaw, rotor_speeds)
 
-        # Print one updating line (no new lines)
+        # Print one updating line
         print(
             f"\rRoll: {roll:5.2f}, Pitch: {pitch:5.2f}, Yaw: {yaw:5.2f} | "
             f"Rotor Speeds: [{rotor_speeds[0]:6.1f}, {rotor_speeds[1]:6.1f}, {rotor_speeds[2]:6.1f}, {rotor_speeds[3]:6.1f}]",
